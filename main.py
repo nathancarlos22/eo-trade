@@ -116,6 +116,10 @@ ax2.grid()
 
 fig.autofmt_xdate()
 
+# Variáveis para armazenar o último sinal enviado
+last_buy_signal_time = None
+last_sell_signal_time = None
+
 # Loop para obter dados novos a cada 1 minuto
 while True:
     current_time = datetime.now()
@@ -154,14 +158,17 @@ while True:
 
         line_capital.set_data(portfolio.index, portfolio['total'])
 
-        # print quando houver sinal de compra ou venda
-        if buy_signals.tail(1)['Close'].values[0] == data.tail(1)['Close'].values[0]:
-            print(f"\nSinal de Compra em {buy_signals.index[-1]}: {buy_signals.tail(1)['Close'].values[0]}")
-            sendMenssageTelegram(f"\nSinal de Compra em {buy_signals.index[-1]}: {buy_signals.tail(1)['Close'].values[0]}")
+        # Verificar e enviar sinal de compra
+        if not buy_signals.empty and buy_signals.index[-1] < data.index[-1] and buy_signals.index[-1] != last_buy_signal_time:
+            last_buy_signal_time = buy_signals.index[-1]
+            print(f"\nSinal de Compra em {last_buy_signal_time}: {buy_signals.tail(1)['Close'].values[0]}")
+            sendMenssageTelegram(f"\nSinal de Compra em {last_buy_signal_time}: {buy_signals.tail(1)['Close'].values[0]}")
 
-        if sell_signals.tail(1)['Close'].values[0] == data.tail(1)['Close'].values[0]:
-            print(f"\nSinal de Venda em {sell_signals.index[-1]}: {sell_signals.tail(1)['Close'].values[0]}")
-            sendMenssageTelegram(f"\nSinal de Venda em {sell_signals.index[-1]}: {sell_signals.tail(1)['Close'].values[0]}")
+        # Verificar e enviar sinal de venda
+        if not sell_signals.empty and sell_signals.index[-1] < data.index[-1] and sell_signals.index[-1] != last_sell_signal_time:
+            last_sell_signal_time = sell_signals.index[-1]
+            print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_signals.tail(1)['Close'].values[0]}")
+            sendMenssageTelegram(f"\nSinal de Venda em {last_sell_signal_time}: {sell_signals.tail(1)['Close'].values[0]}")
 
         # Adicionar anotações para sinais de compra e venda
         for spine in ax1.spines.values():
