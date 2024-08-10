@@ -172,14 +172,14 @@ def update_graph(frame):
         last_buy_signal_time = buy_signals.index[-1]
         buy_price = buy_signals['Close'].iloc[-1]
         print(f"\nSinal de Compra em {last_buy_signal_time}: {buy_price}")
-        # send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
+        send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
 
     # Verificar e enviar sinal de venda
     if not sell_signals.empty and sell_signals.index[-1] != last_sell_signal_time:
         last_sell_signal_time = sell_signals.index[-1]
         sell_price = sell_signals['Close'].iloc[-1]
         print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_price}")
-        # send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
+        send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
 
     # Ajustar limites dos eixos
     ax1.relim()
