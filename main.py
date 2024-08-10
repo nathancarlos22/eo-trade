@@ -24,26 +24,36 @@ client = Client(api_key, api_secret)
 def send_telegram_message(message):
     """Envia uma mensagem para o Telegram."""
     try:
+        print(f"Enviando mensagem para o Telegram: {message}")
         url_base = f'https://api.telegram.org/bot{token}/sendMessage'
         params = {'chat_id': chat_id, 'text': message}
         response = requests.get(url_base, params=params)
         response.raise_for_status()
+        print("Mensagem enviada com sucesso.")
         return response.json()['result']['message_id']
     except requests.RequestException as e:
         print(f"Erro ao enviar mensagem para o Telegram: {e}")
         return None
 
-def calculate_indicators(data, ema_short_period, ema_long_period):
-    """Calcula as EMAs, VWAP e sinais de compra/venda."""
+def calculate_indicators(data, ema_short_period, ema_long_period, rsi_period=14):
+    """Calcula as EMAs, VWAP, RSI e sinais de compra/venda."""
+    print(f"Calculando indicadores com EMA Curta: {ema_short_period}, EMA Longa: {ema_long_period}")
     data['ema_short'] = data['Close'].ewm(span=ema_short_period, adjust=False).mean()
     data['ema_long'] = data['Close'].ewm(span=ema_long_period, adjust=False).mean()
     data['vwap'] = (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
     
+    delta = data['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
+    rs = gain / loss
+    data['rsi'] = 100 - (100 / (1 + rs))
+    
     data['signal'] = np.where(
-        (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']), 1.0,
-        np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']), -1.0, 0.0)
+        (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']) & (data['rsi'] < 70), 1.0,
+        np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']) & (data['rsi'] > 30), -1.0, 0.0)
     )
     data['positions'] = data['signal'].diff()
+    print(f"Indicadores calculados para {len(data)} linhas de dados.")
     return data
 
 def backtest(data, initial_capital):
@@ -60,6 +70,7 @@ def backtest(data, initial_capital):
 
 def get_historical_data(symbol, interval, period):
     """Carrega dados históricos do Binance."""
+    print(f"Carregando dados históricos para {symbol} com intervalo {interval} e período {period}.")
     klines = client.get_historical_klines(symbol, interval, period)
     data = pd.DataFrame(klines, columns=[
         'timestamp', 'Open', 'High', 'Low', 'Close', 'Volume', 
@@ -68,13 +79,15 @@ def get_historical_data(symbol, interval, period):
     ])
     data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
     data.set_index('timestamp', inplace=True)
+    print(f"Dados carregados: {data.shape[0]} linhas")
     return data[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
 
 # Parâmetros iniciais
 initial_capital = 10000.0
+# Otimização dos parâmetros EMA
 best_total = 0
-best_ema_short_period = 5
-best_ema_long_period = 20
+best_ema_short_period = 3
+best_ema_long_period = 23
 
 # Carregar os dados históricos do BTC/USD com intervalo de 1 minuto
 data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
@@ -132,6 +145,7 @@ def update_graph(frame):
     """Atualiza o gráfico com novos dados."""
     global data, portfolio, last_buy_signal_time, last_sell_signal_time
 
+    print("Atualizando o gráfico...")
     data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
     data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
     portfolio = backtest(data, initial_capital)
@@ -158,14 +172,14 @@ def update_graph(frame):
         last_buy_signal_time = buy_signals.index[-1]
         buy_price = buy_signals['Close'].iloc[-1]
         print(f"\nSinal de Compra em {last_buy_signal_time}: {buy_price}")
-        send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
+        # send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
 
     # Verificar e enviar sinal de venda
     if not sell_signals.empty and sell_signals.index[-1] != last_sell_signal_time:
         last_sell_signal_time = sell_signals.index[-1]
         sell_price = sell_signals['Close'].iloc[-1]
         print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_price}")
-        send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
+        # send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
 
     # Ajustar limites dos eixos
     ax1.relim()
