@@ -35,22 +35,18 @@ def send_telegram_message(message):
         print(f"Erro ao enviar mensagem para o Telegram: {e}")
         return None
 
-def calculate_indicators(data, ema_short_period, ema_long_period, rsi_period=14):
-    """Calcula as EMAs, VWAP, RSI e sinais de compra/venda."""
+def calculate_indicators(data, ema_short_period, ema_long_period):
+    """Calcula as EMAs, VWAP e sinais de compra/venda."""
     print(f"Calculando indicadores com EMA Curta: {ema_short_period}, EMA Longa: {ema_long_period}")
     data['ema_short'] = data['Close'].ewm(span=ema_short_period, adjust=False).mean()
     data['ema_long'] = data['Close'].ewm(span=ema_long_period, adjust=False).mean()
     data['vwap'] = (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
     
     delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
-    rs = gain / loss
-    data['rsi'] = 100 - (100 / (1 + rs))
     
     data['signal'] = np.where(
-        (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']) & (data['rsi'] < 70), 1.0,
-        np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']) & (data['rsi'] > 30), -1.0, 0.0)
+        (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']), 1.0,
+        np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']), -1.0, 0.0)
     )
     data['positions'] = data['signal'].diff()
     print(f"Indicadores calculados para {len(data)} linhas de dados.")
@@ -90,7 +86,7 @@ best_ema_short_period = 3
 best_ema_long_period = 23
 
 # Carregar os dados históricos do BTC/USD com intervalo de 1 minuto
-data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
+data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
 
 # Testar diferentes combinações de períodos das EMAs
 for ema_short_period in range(3, 15):
@@ -104,6 +100,8 @@ for ema_short_period in range(3, 15):
             best_ema_short_period = ema_short_period
             best_ema_long_period = ema_long_period
             print(f"Novo melhor total: {best_total} com EMA Curta: {best_ema_short_period} e EMA Longa: {best_ema_long_period}")
+
+print(f"\nMelhor total: {best_total} com EMA Curta: {best_ema_short_period} e EMA Longa: {best_ema_long_period}")
 
 # Calcular indicadores com os melhores parâmetros
 data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
@@ -146,7 +144,7 @@ def update_graph(frame):
     global data, portfolio, last_buy_signal_time, last_sell_signal_time
 
     print("Atualizando o gráfico...")
-    data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
+    data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
     data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
     portfolio = backtest(data, initial_capital)
     
