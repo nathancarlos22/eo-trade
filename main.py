@@ -143,49 +143,57 @@ def update_graph(frame):
     """Atualiza o gráfico com novos dados."""
     global data, portfolio, last_buy_signal_time, last_sell_signal_time
 
-    print("Atualizando o gráfico...")
-    data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
-    data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
-    portfolio = backtest(data, initial_capital)
-    
-    data = data.tail(100)
-    portfolio = portfolio.tail(100)
-    
-    # Atualizar gráficos
-    line_price.set_data(data.index, data['Close'])
-    line_ema_short.set_data(data.index, data['ema_short'])
-    line_ema_long.set_data(data.index, data['ema_long'])
-    line_vwap.set_data(data.index, data['vwap'])
+    try:
+        print("Atualizando o gráfico...")
+        data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
+        data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
+        portfolio = backtest(data, initial_capital)
+        
+        data = data.tail(100)
+        portfolio = portfolio.tail(100)
+        
+        # Atualizar gráficos
+        line_price.set_data(data.index, data['Close'])
+        line_ema_short.set_data(data.index, data['ema_short'])
+        line_ema_long.set_data(data.index, data['ema_long'])
+        line_vwap.set_data(data.index, data['vwap'])
 
-    buy_signals = data.loc[data['positions'] == 1.0]
-    sell_signals = data.loc[data['positions'] == -1.0]
+        buy_signals = data.loc[data['positions'] == 1.0]
+        sell_signals = data.loc[data['positions'] == -1.0]
 
-    line_buy_signals.set_data(buy_signals.index, buy_signals['Close'])
-    line_sell_signals.set_data(sell_signals.index, sell_signals['Close'])
+        line_buy_signals.set_data(buy_signals.index, buy_signals['Close'])
+        line_sell_signals.set_data(sell_signals.index, sell_signals['Close'])
 
-    line_capital.set_data(portfolio.index, portfolio['total'])
+        line_capital.set_data(portfolio.index, portfolio['total'])
 
-    # Verificar e enviar sinal de compra
-    if not buy_signals.empty and buy_signals.index[-1] != last_buy_signal_time:
-        last_buy_signal_time = buy_signals.index[-1]
-        buy_price = buy_signals['Close'].iloc[-1]
-        print(f"\nSinal de Compra em {last_buy_signal_time}: {buy_price}")
-        send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
+        # Verificar e enviar sinal de compra
+        if not buy_signals.empty and buy_signals.index[-1] != last_buy_signal_time:
+            last_buy_signal_time = buy_signals.index[-1]
+            buy_price = buy_signals['Close'].iloc[-1]
+            print(f"\nSinal de Compra em {last_buy_signal_time}: {buy_price}")
+            send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
 
-    # Verificar e enviar sinal de venda
-    if not sell_signals.empty and sell_signals.index[-1] != last_sell_signal_time:
-        last_sell_signal_time = sell_signals.index[-1]
-        sell_price = sell_signals['Close'].iloc[-1]
-        print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_price}")
-        send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
+        # Verificar e enviar sinal de venda
+        if not sell_signals.empty and sell_signals.index[-1] != last_sell_signal_time:
+            last_sell_signal_time = sell_signals.index[-1]
+            sell_price = sell_signals['Close'].iloc[-1]
+            print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_price}")
+            send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
 
-    # Ajustar limites dos eixos
-    ax1.relim()
-    ax1.autoscale_view()
-    ax2.relim()
-    ax2.autoscale_view()
+        # Ajustar limites dos eixos
+        ax1.relim()
+        ax1.autoscale_view()
+        ax2.relim()
+        ax2.autoscale_view()
 
-    fig.canvas.draw()
+        fig.canvas.draw()
+
+    except Exception as e:
+        print(f"Erro ao atualizar o gráfico: {e}")
+        # Opcionalmente, enviar uma mensagem de erro para o Telegram
+        send_telegram_message(f"Erro ao atualizar o gráfico: {e}")
+        time.sleep(10)  # Espera 10 segundos antes de tentar novamente
+
 
 # Configurar animação
 ani = FuncAnimation(fig, update_graph, interval=60000, cache_frame_data=False)  # Atualiza a cada 1 minuto (60000ms)
