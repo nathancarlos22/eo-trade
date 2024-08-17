@@ -86,7 +86,7 @@ best_ema_short_period = 3
 best_ema_long_period = 23
 
 # Carregar os dados históricos do BTC/USD com intervalo de 1 minuto
-data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
+data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
 
 # Testar diferentes combinações de períodos das EMAs
 for ema_short_period in range(3, 15):
@@ -145,7 +145,7 @@ def update_graph(frame):
 
     try:
         print("Atualizando o gráfico...")
-        data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1MINUTE, '7 days ago UTC')
+        data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
         data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
         portfolio = backtest(data, initial_capital)
         
