@@ -35,20 +35,39 @@ def send_telegram_message(message):
         print(f"Erro ao enviar mensagem para o Telegram: {e}")
         return None
 
-def calculate_indicators(data, ema_short_period, ema_long_period):
+def calculate_indicators(data, ema_short_period, ema_long_period, rsi_period):
     """Calcula as EMAs, VWAP e sinais de compra/venda."""
-    print(f"Calculando indicadores com EMA Curta: {ema_short_period}, EMA Longa: {ema_long_period}")
+    print(f"Calculando indicadores com EMA Curta: {ema_short_period}, EMA Longa: {ema_long_period}, RSI Período: {rsi_period}")
+    
+    # EMAs e VWAP
     data['ema_short'] = data['Close'].ewm(span=ema_short_period, adjust=False).mean()
     data['ema_long'] = data['Close'].ewm(span=ema_long_period, adjust=False).mean()
     data['vwap'] = (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
     
+    # Cálculo do RSI
     delta = data['Close'].diff()
+    gain = np.where(delta > 0, delta, 0)
+    loss = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(window=rsi_period, min_periods=1).mean()
+    avg_loss = pd.Series(loss).rolling(window=rsi_period, min_periods=1).mean()
+    rs = avg_gain / avg_loss
+    data['rsi'] = 100 - (100 / (1 + rs))
     
+    # Sinais baseados no RSI
+    data['rsi_signal'] = np.where(data['rsi'] > 70, -1.0, np.where(data['rsi'] < 30, 1.0, 0.0))
+    
+    # Sinais baseados em EMAs e VWAP
     data['signal'] = np.where(
         (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']), 1.0,
         np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']), -1.0, 0.0)
     )
+    
+    # Combinar sinais: se houver sinal de RSI, usá-lo; senão, usar o sinal baseado em EMAs
+    data['signal'] = np.where(data['rsi_signal'] != 0, data['rsi_signal'], data['signal'])
+    
+    # Determinar posições
     data['positions'] = data['signal'].diff()
+    
     print(f"Indicadores calculados para {len(data)} linhas de dados.")
     return data
 
@@ -89,9 +108,10 @@ best_ema_long_period = 23
 data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
 
 # Testar diferentes combinações de períodos das EMAs
+best_rsi_period = 14  # Defina o período do RSI
 for ema_short_period in range(3, 15):
     for ema_long_period in range(15, 50):
-        data_with_indicators = calculate_indicators(data.copy(), ema_short_period, ema_long_period)
+        data_with_indicators = calculate_indicators(data.copy(), ema_short_period, ema_long_period, best_rsi_period)
         portfolio = backtest(data_with_indicators, initial_capital)
         final_total = portfolio['total'].iloc[-1]
         
@@ -99,12 +119,12 @@ for ema_short_period in range(3, 15):
             best_total = final_total
             best_ema_short_period = ema_short_period
             best_ema_long_period = ema_long_period
-            print(f"Novo melhor total: {best_total} com EMA Curta: {best_ema_short_period} e EMA Longa: {best_ema_long_period}")
+            print(f"Novo melhor total: {best_total} com EMA Curta: {best_ema_short_period}, EMA Longa: {best_ema_long_period} e RSI Período: {best_rsi_period}")
 
-print(f"\nMelhor total: {best_total} com EMA Curta: {best_ema_short_period} e EMA Longa: {best_ema_long_period}")
+print(f"\nMelhor total: {best_total} com EMA Curta: {best_ema_short_period}, EMA Longa: {best_ema_long_period}, e RSI Período: {best_rsi_period}")
 
-# Calcular indicadores com os melhores parâmetros
-data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
+# Calcular indicadores com os melhores parâmetros, incluindo o RSI
+data = calculate_indicators(data, best_ema_short_period, best_ema_long_period, best_rsi_period)
 
 if data.empty:
     print("Erro: Nenhum dado foi carregado.")
@@ -123,6 +143,7 @@ line_price, = ax1.plot([], [], label='Preço BTC/USD', color='blue', lw=2)
 line_ema_short, = ax1.plot([], [], label=f'EMA Curta ({best_ema_short_period})', color='green', lw=2)
 line_ema_long, = ax1.plot([], [], label=f'EMA Longa ({best_ema_long_period})', color='red', lw=2)
 line_vwap, = ax1.plot([], [], label='VWAP', color='purple', lw=2)
+lin_rsi, = ax1.plot([], [], label='RSI', color='orange', lw=2)
 line_buy_signals, = ax1.plot([], [], '^', markersize=10, color='m', label='Sinal de Compra')
 line_sell_signals, = ax1.plot([], [], 'v', markersize=10, color='k', label='Sinal de Venda')
 
@@ -146,7 +167,7 @@ def update_graph(frame):
     try:
         print("Atualizando o gráfico...")
         data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
-        data = calculate_indicators(data, best_ema_short_period, best_ema_long_period)
+        data = calculate_indicators(data, best_ema_short_period, best_ema_long_period, best_rsi_period)
         portfolio = backtest(data, initial_capital)
         
         data = data.tail(100)
@@ -157,6 +178,7 @@ def update_graph(frame):
         line_ema_short.set_data(data.index, data['ema_short'])
         line_ema_long.set_data(data.index, data['ema_long'])
         line_vwap.set_data(data.index, data['vwap'])
+        lin_rsi.set_data(data.index, data['rsi'])
 
         buy_signals = data.loc[data['positions'] == 1.0]
         sell_signals = data.loc[data['positions'] == -1.0]
