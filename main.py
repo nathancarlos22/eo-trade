@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import os
 import requests
 from matplotlib.animation import FuncAnimation
+import threading
 
 load_dotenv()
 
@@ -56,120 +57,31 @@ def calculate_indicators(data, ema_short_period, ema_long_period, rsi_period):
     data['rsi_signal'] = np.where(data['rsi'] > 70, -1.0, np.where(data['rsi'] < 30, 1.0, 0.0))
     
     # Sinais baseados em EMAs e VWAP
-    data['ema_signal'] = np.where(
+    data['signal'] = np.where(
         (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']), 1.0,
         np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']), -1.0, 0.0)
     )
     
     # Combinar sinais: se houver sinal de RSI, usá-lo; senão, usar o sinal baseado em EMAs
-    data['signal'] = np.where(data['rsi_signal'] != 0, data['rsi_signal'], data['ema_signal'])
+    data['signal'] = np.where(data['rsi_signal'] != 0, data['rsi_signal'], data['signal'])
     
     # Determinar posições
-    data['positions'] = data['signal'].replace(0.0, np.nan).ffill().fillna(0.0)
-    
-    # Calcular novos indicadores
-    data = calculate_bollinger_bands(data)
-    data = calculate_bollinger_signals(data)
-    
-    data = calculate_macd(data)
-    data = calculate_macd_signals(data)
-    
-    data = calculate_stochastic_rsi(data)
-    data = calculate_stochastic_rsi_signals(data)
-    
-    data = calculate_sma_cross(data)
-    data = calculate_sma_cross_signals(data)
-    
-    # Combinar os sinais
-    data = combine_signals(data)
+    data['positions'] = data['signal'].diff()
     
     print(f"Indicadores calculados para {len(data)} linhas de dados.")
     return data
 
-def calculate_bollinger_bands(data, period=20, num_std_dev=2):
-    data['sma'] = data['Close'].rolling(window=period).mean()
-    data['std_dev'] = data['Close'].rolling(window=period).std()
-    data['upper_band'] = data['sma'] + (data['std_dev'] * num_std_dev)
-    data['lower_band'] = data['sma'] - (data['std_dev'] * num_std_dev)
-    return data
-
-def calculate_bollinger_signals(data):
-    data['bollinger_signal'] = 0.0
-    data['bollinger_signal'] = np.where(data['Close'] < data['lower_band'], 1.0, data['bollinger_signal'])
-    data['bollinger_signal'] = np.where(data['Close'] > data['upper_band'], -1.0, data['bollinger_signal'])
-    return data
-
-def calculate_macd(data, fast_period=12, slow_period=26, signal_period=9):
-    data['ema_fast'] = data['Close'].ewm(span=fast_period, adjust=False).mean()
-    data['ema_slow'] = data['Close'].ewm(span=slow_period, adjust=False).mean()
-    data['macd'] = data['ema_fast'] - data['ema_slow']
-    data['macd_signal'] = data['macd'].ewm(span=signal_period, adjust=False).mean()
-    data['macd_hist'] = data['macd'] - data['macd_signal']
-    return data
-
-
-def calculate_macd_signals(data):
-    data['macd_signal_line'] = 0.0
-    data['macd_signal_line'] = np.where(data['macd'] > data['macd_signal'], 1.0, data['macd_signal_line'])
-    data['macd_signal_line'] = np.where(data['macd'] < data['macd_signal'], -1.0, data['macd_signal_line'])
-    return data
-
-def calculate_stochastic_rsi(data, rsi_period=14, stochastic_period=14):
-    # Calcular o RSI
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).fillna(0)
-    loss = (-delta.where(delta < 0, 0)).fillna(0)
-    avg_gain = gain.rolling(window=rsi_period).mean()
-    avg_loss = loss.rolling(window=rsi_period).mean()
-    rs = avg_gain / avg_loss
-    data['rsi'] = 100 - (100 / (1 + rs))
-    
-    # Calcular o IFR Estocástico
-    min_rsi = data['rsi'].rolling(window=stochastic_period).min()
-    max_rsi = data['rsi'].rolling(window=stochastic_period).max()
-    data['stochastic_rsi'] = (data['rsi'] - min_rsi) / (max_rsi - min_rsi) * 100
-    return data
-
-def calculate_stochastic_rsi_signals(data):
-    data['stochastic_rsi_signal'] = 0.0
-    data['stochastic_rsi_signal'] = np.where((data['stochastic_rsi'] < 20) & (data['stochastic_rsi'].shift(1) >= 20), 1.0, data['stochastic_rsi_signal'])
-    data['stochastic_rsi_signal'] = np.where((data['stochastic_rsi'] > 80) & (data['stochastic_rsi'].shift(1) <= 80), -1.0, data['stochastic_rsi_signal'])
-    return data
-
-def calculate_sma_cross(data, short_window=50, long_window=200):
-    data['sma_short'] = data['Close'].rolling(window=short_window).mean()
-    data['sma_long'] = data['Close'].rolling(window=long_window).mean()
-    return data
-
-def calculate_sma_cross_signals(data):
-    data['sma_cross_signal'] = 0.0
-    data['sma_cross_signal'] = np.where((data['sma_short'] > data['sma_long']) & (data['sma_short'].shift(1) <= data['sma_long'].shift(1)), 1.0, data['sma_cross_signal'])
-    data['sma_cross_signal'] = np.where((data['sma_short'] < data['sma_long']) & (data['sma_short'].shift(1) >= data['sma_long'].shift(1)), -1.0, data['sma_cross_signal'])
-    return data
-
-def combine_signals(data):
-    # Somar os sinais de diferentes estratégias
-    data['combined_signal'] = data[['signal', 'bollinger_signal', 'macd_signal_line', 'stochastic_rsi_signal', 'sma_cross_signal']].sum(axis=1)
-    
-    # Determinar sinal final
-    data['final_signal'] = np.where(data['combined_signal'] > 0, 1.0, np.where(data['combined_signal'] < 0, -1.0, 0.0))
-    
-    # Determinar posições
-    data['positions'] = data['final_signal'].replace(0.0, np.nan).ffill().fillna(0.0)
-    return data
-
-
 def backtest(data, initial_capital):
     """Executa o backtest com base nos sinais de compra/venda."""
-    data = data.copy()
-    data['positions_shifted'] = data['positions'].shift(1).fillna(0.0)
-    data['trade'] = data['positions'] - data['positions_shifted']
-    data['cash_flow'] = -data['trade'] * data['Close']
-    data['cash'] = initial_capital + data['cash_flow'].cumsum()
-    data['holdings'] = data['positions'] * data['Close']
-    data['total'] = data['cash'] + data['holdings']
-    data['returns'] = data['total'].pct_change()
-    return data
+    positions = data['signal'].fillna(0.0)
+    cash_flow = -positions.diff().multiply(data['Close'])
+    portfolio = pd.DataFrame({
+        'positions': positions.multiply(data['Close']),
+        'cash': initial_capital + cash_flow.cumsum()
+    })
+    portfolio['total'] = portfolio['positions'] + portfolio['cash']
+    portfolio['returns'] = portfolio['total'].pct_change()
+    return portfolio
 
 def get_historical_data(symbol, interval, period):
     """Carrega dados históricos do Binance."""
@@ -188,12 +100,12 @@ def get_historical_data(symbol, interval, period):
 # Parâmetros iniciais
 initial_capital = 10000.0
 # Otimização dos parâmetros EMA
-best_total = initial_capital
+best_total = 0
 best_ema_short_period = 3
 best_ema_long_period = 23
 
-# Carregar os dados históricos do BTC/USD com intervalo de 5 minutos
-data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1HOUR, '7 days ago UTC')
+# Carregar os dados históricos do BTC/USD com intervalo de 1 minuto
+data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
 
 # Testar diferentes combinações de períodos das EMAs
 best_rsi_period = 14  # Defina o período do RSI
@@ -227,33 +139,20 @@ plt.ion()  # Habilitar modo interativo
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12))
 
 # Plotar as linhas iniciais
-ax1.plot(data.index, data['Close'], label='Preço BTC/USD', color='blue', lw=2)
-ax1.plot(data.index, data['ema_short'], label=f'EMA Curta ({best_ema_short_period})', color='green', lw=2)
-ax1.plot(data.index, data['ema_long'], label=f'EMA Longa ({best_ema_long_period})', color='red', lw=2)
-ax1.plot(data.index, data['vwap'], label='VWAP', color='purple', lw=2)
+line_price, = ax1.plot([], [], label='Preço BTC/USD', color='blue', lw=2)
+line_ema_short, = ax1.plot([], [], label=f'EMA Curta ({best_ema_short_period})', color='green', lw=2)
+line_ema_long, = ax1.plot([], [], label=f'EMA Longa ({best_ema_long_period})', color='red', lw=2)
+line_vwap, = ax1.plot([], [], label='VWAP', color='purple', lw=2)
+lin_rsi, = ax1.plot([], [], label='RSI', color='orange', lw=2)
+line_buy_signals, = ax1.plot([], [], '^', markersize=10, color='m', label='Sinal de Compra')
+line_sell_signals, = ax1.plot([], [], 'v', markersize=10, color='k', label='Sinal de Venda')
 
-# Plotar sinais de compra e venda
-buy_signals = portfolio[portfolio['trade'] > 0]
-sell_signals = portfolio[portfolio['trade'] < 0]
-ax1.plot(buy_signals.index, buy_signals['Close'], '^', markersize=10, color='g', label='Sinal de Compra')
-ax1.plot(sell_signals.index, sell_signals['Close'], 'v', markersize=10, color='r', label='Sinal de Venda')
-# Exemplo para plotar Bandas de Bollinger
-ax1.plot(data.index, data['upper_band'], label='Banda Superior', color='cyan', lw=1)
-ax1.plot(data.index, data['lower_band'], label='Banda Inferior', color='cyan', lw=1)
+line_capital, = ax2.plot([], [], label='Evolução do Capital', color='purple', lw=2)
 
 ax1.legend()
 ax1.grid()
-
-ax2.plot(portfolio.index, portfolio['total'], label='Evolução do Capital', color='purple', lw=2)
 ax2.legend()
 ax2.grid()
-
-# Exemplo para plotar MACD
-ax3 = ax1.twinx()  # Criar um segundo eixo y
-ax3.plot(data.index, data['macd'], label='MACD', color='magenta', lw=1)
-ax3.plot(data.index, data['macd_signal'], label='Linha de Sinal', color='orange', lw=1)
-ax3.bar(data.index, data['macd_hist'], label='Histograma MACD', color='gray', alpha=0.3)
-ax3.legend(loc='upper left')
 
 fig.autofmt_xdate()
 
@@ -267,48 +166,27 @@ def update_graph(frame):
 
     try:
         print("Atualizando o gráfico...")
-        data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_1HOUR, '7 days ago UTC')
+        data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
         data = calculate_indicators(data, best_ema_short_period, best_ema_long_period, best_rsi_period)
         portfolio = backtest(data, initial_capital)
         
-        # data = data.tail(100)
-        # portfolio = portfolio.tail(100)
+        data = data.tail(100)
+        portfolio = portfolio.tail(100)
         
-        # Limpar e atualizar gráficos
-        ax1.clear()
-        ax2.clear()
+        # Atualizar gráficos
+        line_price.set_data(data.index, data['Close'])
+        line_ema_short.set_data(data.index, data['ema_short'])
+        line_ema_long.set_data(data.index, data['ema_long'])
+        line_vwap.set_data(data.index, data['vwap'])
+        lin_rsi.set_data(data.index, data['rsi'])
 
-        ax1.plot(data.index, data['Close'], label='Preço BTC/USD', color='blue', lw=2)
-        ax1.plot(data.index, data['ema_short'], label=f'EMA Curta ({best_ema_short_period})', color='green', lw=2)
-        ax1.plot(data.index, data['ema_long'], label=f'EMA Longa ({best_ema_long_period})', color='red', lw=2)
-        ax1.plot(data.index, data['vwap'], label='VWAP', color='purple', lw=2)
+        buy_signals = data.loc[data['positions'] == 1.0]
+        sell_signals = data.loc[data['positions'] == -1.0]
 
-        # Plotar sinais de compra e venda
-        buy_signals = portfolio[portfolio['trade'] > 0]
-        sell_signals = portfolio[portfolio['trade'] < 0]
-        ax1.plot(buy_signals.index, buy_signals['Close'], '^', markersize=10, color='g', label='Sinal de Compra')
-        ax1.plot(sell_signals.index, sell_signals['Close'], 'v', markersize=10, color='r', label='Sinal de Venda')
+        line_buy_signals.set_data(buy_signals.index, buy_signals['Close'])
+        line_sell_signals.set_data(sell_signals.index, sell_signals['Close'])
 
-        # Exemplo para plotar Bandas de Bollinger
-        ax1.plot(data.index, data['upper_band'], label='Banda Superior', color='cyan', lw=1)
-        ax1.plot(data.index, data['lower_band'], label='Banda Inferior', color='cyan', lw=1)
-
-        ax1.legend()
-        ax1.grid()
-
-        ax2.plot(portfolio.index, portfolio['total'], label='Evolução do Capital', color='purple', lw=2)
-        ax2.legend()
-        ax2.grid()
-
-        
-        # Exemplo para plotar MACD
-        ax3 = ax1.twinx()  # Criar um segundo eixo y
-        ax3.plot(data.index, data['macd'], label='MACD', color='magenta', lw=1)
-        ax3.plot(data.index, data['macd_signal'], label='Linha de Sinal', color='orange', lw=1)
-        ax3.bar(data.index, data['macd_hist'], label='Histograma MACD', color='gray', alpha=0.3)
-        ax3.legend(loc='upper left')
-
-        fig.autofmt_xdate()
+        line_capital.set_data(portfolio.index, portfolio['total'])
 
         # Verificar e enviar sinal de compra
         if not buy_signals.empty and buy_signals.index[-1] != last_buy_signal_time:
@@ -324,13 +202,20 @@ def update_graph(frame):
             print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_price}")
             send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
 
-        plt.pause(0.01)
+        # Ajustar limites dos eixos
+        ax1.relim()
+        ax1.autoscale_view()
+        ax2.relim()
+        ax2.autoscale_view()
+
+        fig.canvas.draw()
 
     except Exception as e:
         print(f"Erro ao atualizar o gráfico: {e}")
-        # enviar uma mensagem de erro para o Telegram
+        # Opcionalmente, enviar uma mensagem de erro para o Telegram
         send_telegram_message(f"Erro ao atualizar o gráfico: {e}")
         time.sleep(10)  # Espera 10 segundos antes de tentar novamente
+
 
 # Configurar animação
 ani = FuncAnimation(fig, update_graph, interval=60000, cache_frame_data=False)  # Atualiza a cada 1 minuto (60000ms)
