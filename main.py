@@ -185,9 +185,9 @@ line_take_profit, = ax1.plot([], [], 'x', markersize=10, color='green', label='T
 
 line_capital, = ax2.plot([], [], label='Evolução do Capital', color='purple', lw=2)
 
-ax1.legend()
+ax1.legend(loc='upper left')
 ax1.grid()
-ax2.legend()
+ax2.legend(loc='upper left')
 ax2.grid()
 
 fig.autofmt_xdate()
