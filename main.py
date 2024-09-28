@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 import os
 import requests
 from matplotlib.animation import FuncAnimation
-import threading
 
 load_dotenv()
 
@@ -35,53 +34,106 @@ def send_telegram_message(message):
         print(f"Erro ao enviar mensagem para o Telegram: {e}")
         return None
 
-def calculate_indicators(data, ema_short_period, ema_long_period, rsi_period):
-    """Calcula as EMAs, VWAP e sinais de compra/venda."""
-    print(f"Calculando indicadores com EMA Curta: {ema_short_period}, EMA Longa: {ema_long_period}, RSI Período: {rsi_period}")
-    
-    # EMAs e VWAP
-    data['ema_short'] = data['Close'].ewm(span=ema_short_period, adjust=False).mean()
-    data['ema_long'] = data['Close'].ewm(span=ema_long_period, adjust=False).mean()
-    data['vwap'] = (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
-    
-    # Cálculo do RSI
-    delta = data['Close'].diff()
-    gain = np.where(delta > 0, delta, 0)
-    loss = np.where(delta < 0, -delta, 0)
-    avg_gain = pd.Series(gain).rolling(window=rsi_period, min_periods=1).mean()
-    avg_loss = pd.Series(loss).rolling(window=rsi_period, min_periods=1).mean()
-    rs = avg_gain / avg_loss
-    data['rsi'] = 100 - (100 / (1 + rs))
-    
-    # Sinais baseados no RSI
-    data['rsi_signal'] = np.where(data['rsi'] > 70, -1.0, np.where(data['rsi'] < 30, 1.0, 0.0))
-    
-    # Sinais baseados em EMAs e VWAP
-    data['signal'] = np.where(
-        (data['ema_short'] > data['ema_long']) & (data['Close'] > data['vwap']), 1.0,
-        np.where((data['ema_short'] < data['ema_long']) & (data['Close'] < data['vwap']), -1.0, 0.0)
-    )
-    
-    # Combinar sinais: se houver sinal de RSI, usá-lo; senão, usar o sinal baseado em EMAs
-    data['signal'] = np.where(data['rsi_signal'] != 0, data['rsi_signal'], data['signal'])
-    
-    # Determinar posições
-    data['positions'] = data['signal'].diff()
-    
-    print(f"Indicadores calculados para {len(data)} linhas de dados.")
+def calculate_indicators(data):
+    """Calcula as EMAs necessárias para a estratégia."""
+    # Calcular EMAs de 5 e 21 períodos
+    data['EMA_5'] = data['Close'].ewm(span=5, adjust=False).mean()
+    data['EMA_21'] = data['Close'].ewm(span=21, adjust=False).mean()
     return data
 
-def backtest(data, initial_capital):
-    """Executa o backtest com base nos sinais de compra/venda."""
-    positions = data['signal'].fillna(0.0)
-    cash_flow = -positions.diff().multiply(data['Close'])
-    portfolio = pd.DataFrame({
-        'positions': positions.multiply(data['Close']),
-        'cash': initial_capital + cash_flow.cumsum()
-    })
-    portfolio['total'] = portfolio['positions'] + portfolio['cash']
-    portfolio['returns'] = portfolio['total'].pct_change()
-    return portfolio
+def implement_strategy(data, stop_loss_diff, take_profit_diff, initial_capital):
+    """Implementa a estratégia com stop-loss e take-profit."""
+    data = data.copy()
+    data['Position'] = 0
+    data['Trade'] = 0
+    data['Capital'] = initial_capital
+    data['Stop_Loss'] = np.nan
+    data['Take_Profit'] = np.nan
+
+    position_active = False
+    position_type = None  # 'long' ou 'short'
+    entry_price = 0
+    btc_amount = 0
+    capital = initial_capital
+
+    for i in range(1, len(data)):
+        current_price = data['Close'].iloc[i]
+        prev_EMA_5 = data['EMA_5'].iloc[i - 1]
+        prev_EMA_21 = data['EMA_21'].iloc[i - 1]
+        current_EMA_5 = data['EMA_5'].iloc[i]
+        current_EMA_21 = data['EMA_21'].iloc[i]
+
+        # Verificar se a posição está ativa
+        if position_active:
+            if position_type == 'long':
+                # Verificar stop loss para posição longa
+                if current_price <= entry_price - stop_loss_diff:
+                    data.at[data.index[i], 'Stop_Loss'] = current_price
+                    capital = btc_amount * current_price
+                    btc_amount = 0
+                    position_active = False
+                    position_type = None
+                    data.at[data.index[i], 'Position'] = 0
+                # Verificar take profit para posição longa
+                elif current_price >= entry_price + take_profit_diff:
+                    data.at[data.index[i], 'Take_Profit'] = current_price
+                    capital = btc_amount * current_price
+                    btc_amount = 0
+                    position_active = False
+                    position_type = None
+                    data.at[data.index[i], 'Position'] = 0
+            elif position_type == 'short':
+                # Verificar stop loss para posição vendida
+                if current_price >= entry_price + stop_loss_diff:
+                    data.at[data.index[i], 'Stop_Loss'] = current_price
+                    profit = btc_amount * current_price
+                    capital += profit
+                    btc_amount = 0
+                    position_active = False
+                    position_type = None
+                    data.at[data.index[i], 'Position'] = 0
+                # Verificar take profit para posição vendida
+                elif current_price <= entry_price - take_profit_diff:
+                    data.at[data.index[i], 'Take_Profit'] = current_price
+                    profit = btc_amount * current_price
+                    capital += profit
+                    btc_amount = 0
+                    position_active = False
+                    position_type = None
+                    data.at[data.index[i], 'Position'] = 0
+
+        else:
+            # Verificar cruzamento de EMAs para entrar na posição longa
+            if prev_EMA_5 <= prev_EMA_21 and current_EMA_5 > current_EMA_21:
+                entry_price = current_price
+                btc_amount = capital / entry_price
+                capital = 0
+                position_active = True
+                position_type = 'long'
+                data.at[data.index[i], 'Position'] = 1
+                data.at[data.index[i], 'Trade'] = 1  # Compra
+
+            # Verificar cruzamento de EMAs para entrar na posição vendida (short)
+            elif prev_EMA_5 >= prev_EMA_21 and current_EMA_5 < current_EMA_21:
+                entry_price = current_price
+                btc_amount = - (capital / entry_price)  # btc_amount negativo para posição vendida
+                capital += abs(btc_amount) * entry_price  # Recebe capital da venda a descoberto
+                position_active = True
+                position_type = 'short'
+                data.at[data.index[i], 'Position'] = -1
+                data.at[data.index[i], 'Trade'] = -1  # Venda
+
+        # Atualizar o capital ao longo do tempo
+        if position_active:
+            if position_type == 'long':
+                total_capital = btc_amount * current_price
+            elif position_type == 'short':
+                total_capital = capital + btc_amount * current_price
+            data.at[data.index[i], 'Capital'] = total_capital
+        else:
+            data.at[data.index[i], 'Capital'] = capital
+
+    return data
 
 def get_historical_data(symbol, interval, period):
     """Carrega dados históricos do Binance."""
@@ -99,40 +151,22 @@ def get_historical_data(symbol, interval, period):
 
 # Parâmetros iniciais
 initial_capital = 10000.0
-# Otimização dos parâmetros EMA
-best_total = 0
-best_ema_short_period = 3
-best_ema_long_period = 23
+stop_loss_diff = 150  # Defina o stop-loss
+take_profit_diff = 150  # Defina o take-profit
 
 # Carregar os dados históricos do BTC/USD com intervalo de 1 minuto
 data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
 
-# Testar diferentes combinações de períodos das EMAs
-best_rsi_period = 14  # Defina o período do RSI
-for ema_short_period in range(3, 15):
-    for ema_long_period in range(15, 50):
-        data_with_indicators = calculate_indicators(data.copy(), ema_short_period, ema_long_period, best_rsi_period)
-        portfolio = backtest(data_with_indicators, initial_capital)
-        final_total = portfolio['total'].iloc[-1]
-        
-        if final_total > best_total:
-            best_total = final_total
-            best_ema_short_period = ema_short_period
-            best_ema_long_period = ema_long_period
-            print(f"Novo melhor total: {best_total} com EMA Curta: {best_ema_short_period}, EMA Longa: {best_ema_long_period} e RSI Período: {best_rsi_period}")
+# Calcular indicadores
+data = calculate_indicators(data)
 
-print(f"\nMelhor total: {best_total} com EMA Curta: {best_ema_short_period}, EMA Longa: {best_ema_long_period}, e RSI Período: {best_rsi_period}")
-
-# Calcular indicadores com os melhores parâmetros, incluindo o RSI
-data = calculate_indicators(data, best_ema_short_period, best_ema_long_period, best_rsi_period)
+# Implementar a estratégia
+data = implement_strategy(data, stop_loss_diff, take_profit_diff, initial_capital)
 
 if data.empty:
     print("Erro: Nenhum dado foi carregado.")
 else:
     print(f"Dados carregados: {data.shape[0]} linhas")
-
-# Executar backtest com os melhores parâmetros
-portfolio = backtest(data, initial_capital)
 
 # Inicializar a visualização
 plt.ion()  # Habilitar modo interativo
@@ -140,12 +174,14 @@ fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12))
 
 # Plotar as linhas iniciais
 line_price, = ax1.plot([], [], label='Preço BTC/USD', color='blue', lw=2)
-line_ema_short, = ax1.plot([], [], label=f'EMA Curta ({best_ema_short_period})', color='green', lw=2)
-line_ema_long, = ax1.plot([], [], label=f'EMA Longa ({best_ema_long_period})', color='red', lw=2)
-line_vwap, = ax1.plot([], [], label='VWAP', color='purple', lw=2)
-lin_rsi, = ax1.plot([], [], label='RSI', color='orange', lw=2)
-line_buy_signals, = ax1.plot([], [], '^', markersize=10, color='m', label='Sinal de Compra')
-line_sell_signals, = ax1.plot([], [], 'v', markersize=10, color='k', label='Sinal de Venda')
+line_ema_5, = ax1.plot([], [], label='EMA 5', color='red', lw=1)
+line_ema_21, = ax1.plot([], [], label='EMA 21', color='green', lw=1)
+line_long_entries, = ax1.plot([], [], '^', markersize=10, color='lime', label='Entrada Longa')
+line_long_exits, = ax1.plot([], [], 'v', markersize=10, color='darkgreen', label='Saída Longa')
+line_short_entries, = ax1.plot([], [], 'v', markersize=10, color='darkred', label='Entrada Vendida')
+line_short_exits, = ax1.plot([], [], '^', markersize=10, color='pink', label='Saída Vendida')
+line_stop_loss, = ax1.plot([], [], 'x', markersize=10, color='red', label='Stop Loss')
+line_take_profit, = ax1.plot([], [], 'x', markersize=10, color='green', label='Take Profit')
 
 line_capital, = ax2.plot([], [], label='Evolução do Capital', color='purple', lw=2)
 
@@ -162,45 +198,68 @@ last_sell_signal_time = None
 
 def update_graph(frame):
     """Atualiza o gráfico com novos dados."""
-    global data, portfolio, last_buy_signal_time, last_sell_signal_time
+    global data, last_buy_signal_time, last_sell_signal_time
 
     try:
         print("Atualizando o gráfico...")
         data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
-        data = calculate_indicators(data, best_ema_short_period, best_ema_long_period, best_rsi_period)
-        portfolio = backtest(data, initial_capital)
-        
-        data = data.tail(100)
-        portfolio = portfolio.tail(100)
-        
+        data = calculate_indicators(data)
+        data = implement_strategy(data, stop_loss_diff, take_profit_diff, initial_capital)
+
+        data = data.tail(500)  # Ajuste o número de pontos a serem plotados
+
         # Atualizar gráficos
         line_price.set_data(data.index, data['Close'])
-        line_ema_short.set_data(data.index, data['ema_short'])
-        line_ema_long.set_data(data.index, data['ema_long'])
-        line_vwap.set_data(data.index, data['vwap'])
-        lin_rsi.set_data(data.index, data['rsi'])
+        line_ema_5.set_data(data.index, data['EMA_5'])
+        line_ema_21.set_data(data.index, data['EMA_21'])
 
-        buy_signals = data.loc[data['positions'] == 1.0]
-        sell_signals = data.loc[data['positions'] == -1.0]
+        # Preparar os dados de sinais
+        long_entries = data[(data['Trade'] == 1) & (data['Position'] == 1)]
+        long_exits = data[(data['Trade'] == -1) & (data['Position'] == 0) & (data['Stop_Loss'].notnull() | data['Take_Profit'].notnull())]
 
-        line_buy_signals.set_data(buy_signals.index, buy_signals['Close'])
-        line_sell_signals.set_data(sell_signals.index, sell_signals['Close'])
+        short_entries = data[(data['Trade'] == -1) & (data['Position'] == -1)]
+        short_exits = data[(data['Trade'] == 1) & (data['Position'] == 0) & (data['Stop_Loss'].notnull() | data['Take_Profit'].notnull())]
 
-        line_capital.set_data(portfolio.index, portfolio['total'])
+        stop_loss_signals = data.dropna(subset=['Stop_Loss'])
+        take_profit_signals = data.dropna(subset=['Take_Profit'])
 
-        # Verificar e enviar sinal de compra
-        if not buy_signals.empty and buy_signals.index[-1] != last_buy_signal_time:
-            last_buy_signal_time = buy_signals.index[-1]
-            buy_price = buy_signals['Close'].iloc[-1]
-            print(f"\nSinal de Compra em {last_buy_signal_time}: {buy_price}")
-            send_telegram_message(f"Sinal de Compra em {last_buy_signal_time}: {buy_price}")
+        # Atualizar sinais no gráfico
+        line_long_entries.set_data(long_entries.index, long_entries['Close'])
+        line_long_exits.set_data(long_exits.index, long_exits['Close'])
+        line_short_entries.set_data(short_entries.index, short_entries['Close'])
+        line_short_exits.set_data(short_exits.index, short_exits['Close'])
+        line_stop_loss.set_data(stop_loss_signals.index, stop_loss_signals['Stop_Loss'])
+        line_take_profit.set_data(take_profit_signals.index, take_profit_signals['Take_Profit'])
 
-        # Verificar e enviar sinal de venda
-        if not sell_signals.empty and sell_signals.index[-1] != last_sell_signal_time:
-            last_sell_signal_time = sell_signals.index[-1]
-            sell_price = sell_signals['Close'].iloc[-1]
-            print(f"\nSinal de Venda em {last_sell_signal_time}: {sell_price}")
-            send_telegram_message(f"Sinal de Venda em {last_sell_signal_time}: {sell_price}")
+        line_capital.set_data(data.index, data['Capital'])
+
+        # Verificar e enviar sinais de entrada longa
+        if not long_entries.empty and long_entries.index[-1] != last_buy_signal_time:
+            last_buy_signal_time = long_entries.index[-1]
+            buy_price = long_entries['Close'].iloc[-1]
+            print(f"\nEntrada Longa em {last_buy_signal_time}: {buy_price}")
+            send_telegram_message(f"Entrada Longa em {last_buy_signal_time}: {buy_price}")
+
+        # Verificar e enviar sinais de saída longa
+        if not long_exits.empty and long_exits.index[-1] != last_sell_signal_time:
+            last_sell_signal_time = long_exits.index[-1]
+            sell_price = long_exits['Close'].iloc[-1]
+            print(f"\nSaída Longa em {last_sell_signal_time}: {sell_price}")
+            send_telegram_message(f"Saída Longa em {last_sell_signal_time}: {sell_price}")
+
+        # Verificar e enviar sinais de entrada vendida
+        if not short_entries.empty and short_entries.index[-1] != last_sell_signal_time:
+            last_sell_signal_time = short_entries.index[-1]
+            sell_price = short_entries['Close'].iloc[-1]
+            print(f"\nEntrada Vendida em {last_sell_signal_time}: {sell_price}")
+            send_telegram_message(f"Entrada Vendida em {last_sell_signal_time}: {sell_price}")
+
+        # Verificar e enviar sinais de saída vendida
+        if not short_exits.empty and short_exits.index[-1] != last_buy_signal_time:
+            last_buy_signal_time = short_exits.index[-1]
+            buy_price = short_exits['Close'].iloc[-1]
+            print(f"\nSaída Vendida em {last_buy_signal_time}: {buy_price}")
+            send_telegram_message(f"Saída Vendida em {last_buy_signal_time}: {buy_price}")
 
         # Ajustar limites dos eixos
         ax1.relim()
@@ -215,7 +274,6 @@ def update_graph(frame):
         # Opcionalmente, enviar uma mensagem de erro para o Telegram
         send_telegram_message(f"Erro ao atualizar o gráfico: {e}")
         time.sleep(10)  # Espera 10 segundos antes de tentar novamente
-
 
 # Configurar animação
 ani = FuncAnimation(fig, update_graph, interval=60000, cache_frame_data=False)  # Atualiza a cada 1 minuto (60000ms)
