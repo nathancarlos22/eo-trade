@@ -192,16 +192,28 @@ ax2.grid()
 
 fig.autofmt_xdate()
 
+# Função para verificar se as horas e minutos atuais são múltiplos de 5
+def is_time_multiple_of_five():
+    current_time = datetime.now()
+    return current_time.hour % 5 == 0 and current_time.minute % 5 == 0
+
 # Variáveis para armazenar o último sinal enviado
 last_buy_signal_time = None
 last_sell_signal_time = None
 
+
 def update_graph(frame):
-    """Atualiza o gráfico com novos dados."""
+    """Atualiza o gráfico com novos dados se a hora e os minutos forem múltiplos de 5."""
     global data, last_buy_signal_time, last_sell_signal_time
 
     try:
+        # Verificar se a hora e os minutos são múltiplos de 5
+        if not is_time_multiple_of_five():
+            print("A hora e/ou os minutos atuais não são múltiplos de 5. O gráfico não será atualizado.")
+            return  # Não atualizar o gráfico
+
         print("Atualizando o gráfico...")
+
         data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
         data = calculate_indicators(data)
         data = implement_strategy(data, stop_loss_diff, take_profit_diff, initial_capital)
@@ -241,21 +253,21 @@ def update_graph(frame):
             send_telegram_message(f"Entrada Longa em {last_buy_signal_time}: {buy_price}")
 
         # Verificar e enviar sinais de saída longa
-        if not long_exits.empty and long_exits.index[-1] != last_sell_signal_time:
+        elif not long_exits.empty and long_exits.index[-1] != last_sell_signal_time:
             last_sell_signal_time = long_exits.index[-1]
             sell_price = long_exits['Close'].iloc[-1]
             print(f"\nSaída Longa em {last_sell_signal_time}: {sell_price}")
             send_telegram_message(f"Saída Longa em {last_sell_signal_time}: {sell_price}")
 
         # Verificar e enviar sinais de entrada vendida
-        if not short_entries.empty and short_entries.index[-1] != last_sell_signal_time:
+        elif not short_entries.empty and short_entries.index[-1] != last_sell_signal_time:
             last_sell_signal_time = short_entries.index[-1]
             sell_price = short_entries['Close'].iloc[-1]
             print(f"\nEntrada Vendida em {last_sell_signal_time}: {sell_price}")
             send_telegram_message(f"Entrada Vendida em {last_sell_signal_time}: {sell_price}")
 
         # Verificar e enviar sinais de saída vendida
-        if not short_exits.empty and short_exits.index[-1] != last_buy_signal_time:
+        elif not short_exits.empty and short_exits.index[-1] != last_buy_signal_time:
             last_buy_signal_time = short_exits.index[-1]
             buy_price = short_exits['Close'].iloc[-1]
             print(f"\nSaída Vendida em {last_buy_signal_time}: {buy_price}")
@@ -271,7 +283,6 @@ def update_graph(frame):
 
     except Exception as e:
         print(f"Erro ao atualizar o gráfico: {e}")
-        # Opcionalmente, enviar uma mensagem de erro para o Telegram
         send_telegram_message(f"Erro ao atualizar o gráfico: {e}")
         time.sleep(10)  # Espera 10 segundos antes de tentar novamente
 
