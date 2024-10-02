@@ -64,74 +64,74 @@ def implement_strategy(data, stop_loss_diff, take_profit_diff, initial_capital):
         current_EMA_21 = data['EMA_21'].iloc[i]
 
         # Verificar se a posição está ativa
-        if position_active:
-            if position_type == 'long':
-                # Verificar stop loss para posição longa
-                if current_price <= entry_price - stop_loss_diff:
-                    data.at[data.index[i], 'Stop_Loss'] = current_price
-                    capital = btc_amount * current_price
-                    btc_amount = 0
-                    position_active = False
-                    position_type = None
-                    data.at[data.index[i], 'Position'] = 0
-                # Verificar take profit para posição longa
-                elif current_price >= entry_price + take_profit_diff:
-                    data.at[data.index[i], 'Take_Profit'] = current_price
-                    capital = btc_amount * current_price
-                    btc_amount = 0
-                    position_active = False
-                    position_type = None
-                    data.at[data.index[i], 'Position'] = 0
-            elif position_type == 'short':
-                # Verificar stop loss para posição vendida
-                if current_price >= entry_price + stop_loss_diff:
-                    data.at[data.index[i], 'Stop_Loss'] = current_price
-                    profit = btc_amount * current_price
-                    capital += profit
-                    btc_amount = 0
-                    position_active = False
-                    position_type = None
-                    data.at[data.index[i], 'Position'] = 0
-                # Verificar take profit para posição vendida
-                elif current_price <= entry_price - take_profit_diff:
-                    data.at[data.index[i], 'Take_Profit'] = current_price
-                    profit = btc_amount * current_price
-                    capital += profit
-                    btc_amount = 0
-                    position_active = False
-                    position_type = None
-                    data.at[data.index[i], 'Position'] = 0
+        # if position_active:
+        #     if position_type == 'long':
+        #         # Verificar stop loss para posição longa
+        #         if current_price <= entry_price - stop_loss_diff:
+        #             data.at[data.index[i], 'Stop_Loss'] = current_price
+        #             capital = btc_amount * current_price
+        #             btc_amount = 0
+        #             position_active = False
+        #             position_type = None
+        #             data.at[data.index[i], 'Position'] = 0
+        #         # Verificar take profit para posição longa
+        #         elif current_price >= entry_price + take_profit_diff:
+        #             data.at[data.index[i], 'Take_Profit'] = current_price
+        #             capital = btc_amount * current_price
+        #             btc_amount = 0
+        #             position_active = False
+        #             position_type = None
+        #             data.at[data.index[i], 'Position'] = 0
+        #     elif position_type == 'short':
+        #         # Verificar stop loss para posição vendida
+        #         if current_price >= entry_price + stop_loss_diff:
+        #             data.at[data.index[i], 'Stop_Loss'] = current_price
+        #             profit = btc_amount * current_price
+        #             capital += profit
+        #             btc_amount = 0
+        #             position_active = False
+        #             position_type = None
+        #             data.at[data.index[i], 'Position'] = 0
+        #         # Verificar take profit para posição vendida
+        #         elif current_price <= entry_price - take_profit_diff:
+        #             data.at[data.index[i], 'Take_Profit'] = current_price
+        #             profit = btc_amount * current_price
+        #             capital += profit
+        #             btc_amount = 0
+        #             position_active = False
+        #             position_type = None
+        #             data.at[data.index[i], 'Position'] = 0
 
-        else:
+        # else:
             # Verificar cruzamento de EMAs para entrar na posição longa
-            if prev_EMA_5 <= prev_EMA_21 and current_EMA_5 > current_EMA_21:
-                entry_price = current_price
-                btc_amount = capital / entry_price
-                capital = 0
-                position_active = True
-                position_type = 'long'
-                data.at[data.index[i], 'Position'] = 1
-                data.at[data.index[i], 'Trade'] = 1  # Compra
+        if prev_EMA_5 <= prev_EMA_21 and current_EMA_5 > current_EMA_21:
+            entry_price = current_price
+            btc_amount = capital / entry_price
+            capital = 0
+            position_active = True
+            position_type = 'long'
+            data.at[data.index[i], 'Position'] = 1
+            data.at[data.index[i], 'Trade'] = 1  # Compra
 
-            # Verificar cruzamento de EMAs para entrar na posição vendida (short)
-            elif prev_EMA_5 >= prev_EMA_21 and current_EMA_5 < current_EMA_21:
-                entry_price = current_price
-                btc_amount = - (capital / entry_price)  # btc_amount negativo para posição vendida
-                capital += abs(btc_amount) * entry_price  # Recebe capital da venda a descoberto
-                position_active = True
-                position_type = 'short'
-                data.at[data.index[i], 'Position'] = -1
-                data.at[data.index[i], 'Trade'] = -1  # Venda
+        # Verificar cruzamento de EMAs para entrar na posição vendida (short)
+        elif prev_EMA_5 >= prev_EMA_21 and current_EMA_5 < current_EMA_21:
+            entry_price = current_price
+            btc_amount = - (capital / entry_price)  # btc_amount negativo para posição vendida
+            capital += abs(btc_amount) * entry_price  # Recebe capital da venda a descoberto
+            position_active = True
+            position_type = 'short'
+            data.at[data.index[i], 'Position'] = -1
+            data.at[data.index[i], 'Trade'] = -1  # Venda
 
-        # Atualizar o capital ao longo do tempo
-        if position_active:
-            if position_type == 'long':
-                total_capital = btc_amount * current_price
-            elif position_type == 'short':
-                total_capital = capital + btc_amount * current_price
-            data.at[data.index[i], 'Capital'] = total_capital
-        else:
-            data.at[data.index[i], 'Capital'] = capital
+    # Atualizar o capital ao longo do tempo
+    if position_active:
+        if position_type == 'long':
+            total_capital = btc_amount * current_price
+        elif position_type == 'short':
+            total_capital = capital + btc_amount * current_price
+        data.at[data.index[i], 'Capital'] = total_capital
+    else:
+        data.at[data.index[i], 'Capital'] = capital
 
     return data
 
@@ -155,7 +155,7 @@ stop_loss_diff = 150  # Defina o stop-loss
 take_profit_diff = 150  # Defina o take-profit
 
 # Carregar os dados históricos do BTC/USD com intervalo de 1 minuto
-data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_5MINUTE, '7 days ago UTC')
+data = get_historical_data('BTCUSDT', Client.KLINE_INTERVAL_15MINUTE, '7 days ago UTC')
 
 # Calcular indicadores
 data = calculate_indicators(data)
