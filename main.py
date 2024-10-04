@@ -195,7 +195,7 @@ fig.autofmt_xdate()
 # Função para verificar se as horas e minutos atuais são múltiplos de 5
 def is_time_multiple_of_five():
     current_time = datetime.now()
-    return current_time.minute % 5 == 0
+    return current_time.minute % 15 == 0
 
 # Variáveis para armazenar o último sinal enviado
 last_buy_signal_time = None
